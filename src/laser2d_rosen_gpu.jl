@@ -1,7 +1,6 @@
-using NeuralPDE, Flux, ModelingToolkit, GalacticOptim, Optim, DiffEqFlux
+using NeuralPDE, Lux, Optimization, OptimizationOptimJL
+import ModelingToolkit: Interval
 using SpecialFunctions
-using Quadrature, Cuba, CUDA, QuasiMonteCarlo
-import ModelingToolkit: Interval, infimum, supremum
 
 @parameters t x y
 @variables u(..)
@@ -14,17 +13,17 @@ x_min = 0.
 x_max = 2.
 y_min = 0.
 y_max = 2.
-
+q = 10000; κ = 9; V = 0.1; k = 20.0; T0=298; Q=q
 # 2D PDE
-eq  = Dt(u(t,x,y)) ~ Dxx(u(t,x,y)) + Dyy(u(t,x,y))
-
-analytic_sol_func(q,κ,V,x,y) = T0+q/(2π*k*h)*exp(-V*x/(2*κ))*besselk(0,(V*sqrt(x^2+y^2)/(2κ)))
+eq  = Dt(u(t,x,y)) ~ Dxx(u(t,x,y)) + Dyy(u(t,x,y)) # + Q*exp(-2*(x^2+y^2))
+# analytical solution of Rosenthal
+analytic_sol_func(q,κ,k,V,x,y) = T0+q/(2π*k*1)*exp(-V*x/(2*κ))*besselk(0,(V*sqrt(x^2+y^2)/(2κ)))
 # Initial and boundary conditions
-bcs = [u(t_min,x,y) ~ analytic_sol_func(t_min,x,y),
-       u(t,x_min,y) ~ analytic_sol_func(t,x_min,y),
-       u(t,x_max,y) ~ analytic_sol_func(t,x_max,y),
-       u(t,x,y_min) ~ analytic_sol_func(t,x,y_min),
-       u(t,x,y_max) ~ analytic_sol_func(t,x,y_max)]
+bcs = [u(t_min,x,y) ~ 0.0,
+       u(t,x_min,y) ~ analytic_sol_func(q,κ,k,V,x_min,y),
+       u(t,x_max,y) ~ analytic_sol_func(q,κ,k,V,x_max,y),
+       u(t,x,y_min) ~ analytic_sol_func(q,κ,k,V,x,y_min),
+       u(t,x,y_max) ~ analytic_sol_func(q,κ,k,V,x,y_max)]
 
 # Space and time domains
 domains = [t ∈ Interval(t_min,t_max),
@@ -32,58 +31,45 @@ domains = [t ∈ Interval(t_min,t_max),
            y ∈ Interval(y_min,y_max)]
 
 # Neural network
-inner = 25
-chain = FastChain(FastDense(3,inner,Flux.σ),
-                  FastDense(inner,inner,Flux.σ),
-                  FastDense(inner,inner,Flux.σ),
-                  FastDense(inner,inner,Flux.σ),
-                  FastDense(inner,1))
+# Neural network
+dim = 2 # number of dimensions
+chain = Lux.Chain(Dense(dim,16,Lux.σ),Dense(16,16,Lux.σ),Dense(16,1))
 
-initθ = CuArray(Float64.(DiffEqFlux.initial_params(chain)))
+# Discretization
+dx = 0.05; dy = 0.05
+dt = 0.2
+discretization = PhysicsInformedNN(chain,GridTraining([dt,dx,dy]))
 
-strategy = GridTraining(0.05)
-discretization = PhysicsInformedNN(chain,
-                                   strategy;
-                                   init_params = initθ)
+# Method of lines discretization
+discretization = MOLFiniteDifference([x => dx, y => dy], t; approx_order=order)
+prob = ModelingToolkit.discretize(pdesys, discretization)
 
-@named pde_system = PDESystem(eq,bcs,domains,[t,x,y],[u(t, x, y)])
-prob = discretize(pde_system,discretization)
-symprob = symbolic_discretize(pde_system,discretization)
+#@named pde_system = PDESystem(eq,bcs,domains,[t,x,y],[u(t, x, y)])
+#prob = discretize(pde_system,discretization)
 
-cb = function (p,l)
+#Optimizer
+opt = OptimizationOptimJL.BFGS()
+
+#Callback function
+callback = function (p,l)
     println("Current loss is: $l")
     return false
 end
 
-res = GalacticOptim.solve(prob,ADAM(0.01);cb=cb,maxiters=2500)
-prob = remake(prob,u0=res.minimizer)
-res = GalacticOptim.solve(prob,ADAM(0.001);cb=cb,maxiters=2500)
+res = Optimization.solve(prob, opt; callback = callback, maxiters=1000)
+
 
 phi = discretization.phi
-ts,xs,ys = [infimum(d.domain):0.1:supremum(d.domain) for d in domains]
-u_real = [analytic_sol_func(t,x,y) for t in ts for x in xs for y in ys]
-u_predict = [first(Array(phi([t, x, y], res.minimizer))) for t in ts for x in xs for y in ys]
 
 
 using Plots
-using Printf
 
-function plot_(res)
-    # Animate
-    anim = @animate for (i, t) in enumerate(0:0.05:t_max)
-        @info "Animating frame $i..."
-        u_real = reshape([analytic_sol_func(t,x,y) for x in xs for y in ys], (length(xs),length(ys)))
-        u_predict = reshape([Array(phi([t, x, y], res.minimizer))[1] for x in xs for y in ys], length(xs), length(ys))
-        u_error = abs.(u_predict .- u_real)
-        title = @sprintf("predict, t = %.3f", t)
-        p1 = plot(xs, ys, u_predict,st=:surface, label="", title=title)
-        title = @sprintf("real")
-        p2 = plot(xs, ys, u_real,st=:surface, label="", title=title)
-        title = @sprintf("error")
-        p3 = plot(xs, ys, u_error, st=:contourf,label="", title=title)
-        plot(p1,p2,p3)
-    end
-    gif(anim,"3pde.gif", fps=10)
-end
+xs,ys = [infimum(d.domain):dx/10:supremum(d.domain) for d in domains]
+u_predict = reshape([first(phi([x,y],res.u)) for x in xs for y in ys],(length(xs),length(ys)))
+u_real = reshape([analytic_sol_func(q,κ,k,V,x,y) for x in xs for y in ys], (length(xs),length(ys)))
+diff_u = abs.(u_predict .- u_real)
 
-plot_(res)
+p1 = plot(xs, ys, u_real, linetype=:contourf,title = "analytic");
+p2 = plot(xs, ys, u_predict, linetype=:contourf,title = "predict");
+p3 = plot(xs, ys, diff_u,linetype=:contourf,title = "error");
+plot(p1,p2,p3)

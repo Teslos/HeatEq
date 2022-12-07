@@ -9,13 +9,7 @@ else
     @init_parallel_stencil(Threads, Float64, 3);
 end
 
-@parallel_indices (ix,iy,iz) function updatecp!(Ci,c0,T,Lf,σ,Tm)
-        if (ix>1 && ix<size(Ci,1) && iy>1 && iy<size(Ci,2) && iz>1 && iz<size(Ci,3))
-            c = (c0+Lf*exp(-(T[ix,iy,iz]-Tm)^2/(2*σ^2))
-            Ci[ix,iy,iz] = 1/c
-        end
-        return
-end
+
 
 @parallel_indices (ix,iy,iz) function diffusion3D_step!(T2, T, Q, Ci, lam, dt, _dx, _dy, _dz, dx, dy, dz, x0, y0, z0, a,b,c)
         if (ix>1 && ix<size(T2,1) && iy>1 && iy<size(T2,2) && iz>1 && iz<size(T2,3))
@@ -33,7 +27,7 @@ function diffusion3D(;do_vtk=true)
 # Physics
 lam        = 30.1;                                        # Thermal conductivity
 c0         = 7860*624;                                    # Heat capacity
-Lf         = 292e+3                                       # Latent heat
+
 lx, ly, lz = 2e-3, 1e-3, 1e-4                             # Length of computational domain in dimension x, y and z
 a,  b,  c  = 0.5e-4, 0.5e-4, 5.0e-5                       # laser parameters
 v  = 1.5                                                  # laser speed
@@ -71,10 +65,7 @@ for it = 1:nt
     #Sl = CUDA.CuArray(source(it*dt))
     x0 = v*it*dt
 
-    @hide_communication (16, 2, 2) begin
-        @parallel updatecp!(Ci,T,Lf,σ,Tm))
-        update_halo!(Ci)
-    end
+
 
     @hide_communication (16, 2, 2) begin
         @parallel diffusion3D_step!(T2, T,  Q, Ci, lam,  dt, _dx, _dy, _dz, dx,

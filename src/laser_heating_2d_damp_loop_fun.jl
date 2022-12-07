@@ -57,7 +57,7 @@ end
     r₀ = 1                # laser beam size
     v  = 0.7              # laser speed
     P  = 1.e4;
-    kx, ky = 2.0, 2.0     # conductivity of the material
+    kx, ky = 2.0, 2 .0     # conductivity of the material
     # Numerics
     nx, ny = 256, 256     # number of grid points
     tol    = 1e-6         # tolerance
