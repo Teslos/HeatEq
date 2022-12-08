@@ -1,4 +1,4 @@
-# 2D nonlinear explicit diffusion solver
+# 2D nonlinear explicit heat-diffusion solver
 using Plots, Printf, LinearAlgebra
 
 # enable plotting by default
