@@ -31,7 +31,8 @@ _θ = rand.(θ)
 prob1 = ODEProblem(duffing,u0,tspan,_θ)
 sol = solve(prob1,Tsit5())
 plot(sol)
-
+# phase space solution 
+plot([sol[i][1] for i=1:length(sol.t)], [sol.u[i][2] for i = 1:length(sol.t)])
 prob_func = function(prob,i,repeat)
     remake(prob,p=rand.(θ))
 end
