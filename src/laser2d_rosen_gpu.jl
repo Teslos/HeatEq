@@ -1,5 +1,7 @@
 using NeuralPDE, Lux, Optimization, OptimizationOptimJL
 import ModelingToolkit: Interval
+using MethodOfLines
+
 using SpecialFunctions
 
 @parameters t x y
@@ -40,13 +42,14 @@ dx = 0.05; dy = 0.05
 dt = 0.2
 discretization = PhysicsInformedNN(chain,GridTraining([dt,dx,dy]))
 
-# Space and time domains
-@named pdesys = PDESystem([eq], bcs, domains, [t, x, y], [u(t, x, y)])
+# system of PDE equations
+@named pde_system = PDESystem(eq,bcs,domains,[t,x,y],[u(t, x, y)])
 # Method of lines discretization
-discretization = MOLFiniteDifference([x => dx, y => dy], t; approx_order=order)
-prob = ModelingToolkit.discretize(pdesys, discretization)
+order = 2
+#discretization = MOLFiniteDifference([x => dx, y => dy], t; approx_order=order)
+prob = ModelingToolkit.discretize(pde_system, discretization)
 
-#@named pde_system = PDESystem(eq,bcs,domains,[t,x,y],[u(t, x, y)])
+
 #prob = discretize(pde_system,discretization)
 
 #Optimizer
@@ -58,7 +61,7 @@ callback = function (p,l)
     return false
 end
 
-res = Optimization.solve(prob, opt; callback = callback, maxiters=1000)
+res = Optimization.solve(prob, BFGS(); callback = callback, maxiters=1000)
 
 
 phi = discretization.phi

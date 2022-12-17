@@ -2,7 +2,6 @@
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 BlackBoxOptim = "a134a8b2-14d6-55f6-9291-3336d3ab0209"
 CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
-ControlSystems = "a6e380b2-a6ca-5380-bf3e-84a91bcd477e"
 Cuba = "8a292aeb-7a57-582c-b821-06e4c11590b1"
 DataDrivenDiffEq = "2445eb08-9709-466a-b3fc-47e12bd697a2"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
