@@ -40,6 +40,8 @@ dx = 0.05; dy = 0.05
 dt = 0.2
 discretization = PhysicsInformedNN(chain,GridTraining([dt,dx,dy]))
 
+# Space and time domains
+@named pdesys = PDESystem([eq], bcs, domains, [t, x, y], [u(t, x, y)])
 # Method of lines discretization
 discretization = MOLFiniteDifference([x => dx, y => dy], t; approx_order=order)
 prob = ModelingToolkit.discretize(pdesys, discretization)
