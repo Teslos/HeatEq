@@ -4,6 +4,7 @@
 using ModelingToolkit,DiffEqOperators,LinearAlgebra,DomainSets
 using ModelingToolkit: Differential
 using DifferentialEquations
+using MethodOfLines
 
 @parameters x y
 @variables u(..)
