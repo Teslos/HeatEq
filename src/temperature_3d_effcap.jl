@@ -11,15 +11,15 @@ else
 end
 
 # find max depth of the melt pool
-function find_max_depth(T, Tm, σ, dz, max_depth)
-    for iz=1:size(T,3)
-        if (T[ix,iy,iz] > Tm+σ)
-            # find max depth
-            if (iz-1)*dz > max_depth
-                max_depth = (iz-1)*dz
-            end
-        end
-    end
+function find_max_depth(T, Tm, σ, dx,dy, dz, max_depth, x0, y0, z0)
+
+    # find all cells with temperature below Tm+σ
+    solid_cells = findall(x -> x < Tm+σ, T[:,:,:])
+
+    # find the maximum depth of the melt pool
+    im = maximum([(Tuple(e))[3] for e in solid_cells])
+    max_depth = dz*im
+    print("Max. depth: ", max_depth)
     return
 end
 
@@ -55,13 +55,13 @@ Tm         = 1933
 max_depth  = 0
 a,  b,  c  = 0.5e-4, 0.5e-4, 5.0e-5                       # laser parameters
 v  = 1.5                                                  # laser speed
-P  = 100                                                  # power laser
+P  = 200                                                  # power laser
 α  = 0.4                                                  # absorption coefficient
 σ  = 5
 time_stedy_state = 0.025                                    # Time for steady state
 # Numerics
 nx, ny, nz = 256, 256, 64;                               # Number of gridpoints in dimensions x, y and z
-nt         = 10000;                                      # Number of time steps
+nt         = 1000;                                       # Number of time steps
 
 if ImplicitGlobalGrid.grid_is_initialized()
     me, dims   = init_global_grid(nx, ny, nz, init_MPI=false)
@@ -92,7 +92,7 @@ dt   = min(dx^2,dy^2,dz^2)/lam/maximum(1/c0)/8.1;          # Time step for 3D He
 @printf("Choosen timestep: %g\n",dt)
 y0 = ly/2; z0 = lz-dz;
 ns = Int(ceil(time_stedy_state/dt))                     # Number of time steps for steady state
-for it = 1:ns
+for it = 1:nt
     if (it == 11) tic(); end                             # Start measuring time.
     #Sl = CUDA.CuArray(source(it*dt))
     x0 = v*it*dt
@@ -106,7 +106,10 @@ for it = 1:ns
     T, T2 = T2, T;
 end
 time_s = toc()
-find_max_depth(T, Tm, σ, dz, max_depth)
+x0 = v*nt*dt
+max_depth = lz-dz
+print("Max. depth at start: ", max_depth)
+find_max_depth(T, Tm, σ, dx, dy, dz, max_depth, x0, y0, z0)
 println("Max. depth: ", max_depth)
 
 # Performance
