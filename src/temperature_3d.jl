@@ -11,10 +11,13 @@ using StructTypes
 else
     @init_parallel_stencil(Threads, Float64, 3);
 end
-
+# parameters struct to pass to simulation
 mutable struct MyParameters
     lam::Float64
     c0::Float64
+    lx::Float64
+    ly::Float64
+    lz::Float64
     Lf::Float64
     Tm::Float64
     σ::Float64
@@ -24,6 +27,10 @@ mutable struct MyParameters
     v::Float64
     P::Float64
     α::Float64
+    nx::Int64
+    ny::Int64
+    nz::Int64
+    nt::Int64
 end
 
 StructTypes.StructType(::Type{MyParameters}) = StructTypes.OrderedStruct()
@@ -52,18 +59,18 @@ parameters = JSON3.read(json_data, MyParameters)
 print(parameters)
 
 # Physics
-lam        = 30.1;                                        # Thermal conductivity
-c0         = 7860*624;                                    # Heat capacity
+lam        = parameters.lam                               # Thermal conductivity
+c0         = parameters.c0                                # Heat capacity
 
-lx, ly, lz = 2e-3, 1e-3, 1e-4                             # Length of computational domain in dimension x, y and z
-a,  b,  c  = 0.5e-4, 0.5e-4, 5.0e-5                       # laser parameters
-v  = 0.01                                                 # laser speed
-P  = 200                                                  # power laser
-α  = 0.4
-σ  = 1e-4                                                 # absorption coefficient
+lx, ly, lz = parameters.lx, parameters.ly, parameters.lz  # Length of computational domain in dimension x, y and z
+a,  b,  c  = parameters.a, parameters.b, parameters.c     # laser parameters
+v  = parameters.v                                         # laser speed
+P  = parameters.P                                         # power laser
+α  = parameters.α                                         # absorption coefficient
+σ  = parameters.σ                                         # absorption coefficient
 # Numerics
-nx, ny, nz = 256, 256, 64;                               # Number of gridpoints in dimensions x, y and z
-nt         = 10000;                                      # Number of time steps
+nx, ny, nz = parameters.nx, parameters.ny, parameters.nz;        # Number of gridpoints in dimensions x, y and z
+nt         = parameters.nt;                                      # Number of time steps
 me, dims   = init_global_grid(nx, ny, nz);
 dx         = lx/(nx_g()-1);                              # Space step in x-dimension
 dy         = ly/(ny_g()-1);                              # Space step in y-dimension
