@@ -49,13 +49,14 @@ function diffusion3D(;do_vtk=true)
 lam        = 30.1;                                        # Thermal conductivity
 c0         = 7860*624;                                    # Heat capacity
 lx, ly, lz = 2e-3, 1e-3, 1e-4                             # Length of computational domain in dimension x, y and z
-Lf         = 292e+4*7860                                  # Latent heat
+#Lf         = 292e+4*7860                                 # Latent heat
+Lf         = 0.0                                          # Latent heat for test
 Tm         = 1933
 σ          = 0.001
 max_depth  = 0
-a,  b,  c  = 0.5e-4, 0.5e-4, 5.0e-5                       # laser parameters
-v  = 1.5                                                  # laser speed
-P  = 200                                                  # power laser
+a,  b,  c  = 0.5e-4, 0.5e-4, 5.0e-5                       # laser parameters (elliptical Gaussian)
+v  = 0.01                                                 # laser speed (m/s)
+P  = 200                                                  # power laser (W)
 α  = 0.4                                                  # absorption coefficient
 σ  = 5
 time_stedy_state = 0.025                                    # Time for steady state
@@ -81,21 +82,22 @@ T2  = @zeros(nx, ny, nz)
 Lam = @zeros(nx, ny, nz)
 Ci  = @zeros(nx, ny, nz)
 
-# Initial conditions
-Lam .= Data.Array([if (iy > ny/2) lam else lam/10 end for ix=1:size(Lam,1), iy=1:size(Lam,2),iz=1:size(Lam,3)])                                              # conductivity
+Lam .= Data.Array([if (iy > ny/2) lam else lam/2.0 end for ix=1:size(Lam,1), iy=1:size(Lam,2),iz=1:size(Lam,3)])                                    # conductivity
+#Lam .= Data.Array([lam*0.5(tanh(iy-ny/2)+1) for ix=1:size(Lam,1), iy=1:size(Lam,2),iz=1:size(Lam,3)])                                              # conductivity
 
+# Initial conditions
 T   .= 1.7;
 T2  .= T;                                                 # Assign also T2 to get correct boundary conditions.
 Q = 6.0*sqrt(3)*α*P/(π*sqrt(π)*a*b*c)                     # Laser flux for Goldak's heat source
 # Time loop
 dt   = min(dx^2,dy^2,dz^2)/lam/maximum(1/c0)/8.1;          # Time step for 3D Heat diffusion
 @printf("Choosen timestep: %g\n",dt)
-y0 = ly/2; z0 = lz-dz;
+x0=lx/2; y0 = ly/2; z0 = lz-dz;
 ns = Int(ceil(time_stedy_state/dt))                     # Number of time steps for steady state
 for it = 1:nt
     if (it == 11) tic(); end                             # Start measuring time.
     #Sl = CUDA.CuArray(source(it*dt))
-    x0 = v*it*dt
+    x0 += v*dt  # @ivt: note this is was bug in original code x0 = x0 + v*dt
 
     @hide_communication (16, 2, 2) begin
         @parallel diffusion3D_step!(T2, T,  Q, Lam, σ, c0, Lf, Tm, dt, _dx, _dy, _dz, dx,
@@ -122,7 +124,7 @@ finalize_global_grid();
 
 
 if do_vtk
-    vtk_grid("fields", xc, yc, zc) do vtk
+    vtk_grid("fields_effcap", xc, yc, zc) do vtk
         vtk["Temperature"] = Array(T)
     end
 end

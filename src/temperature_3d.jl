@@ -11,6 +11,7 @@ using StructTypes
 else
     @init_parallel_stencil(Threads, Float64, 3);
 end
+
 # parameters struct to pass to simulation
 mutable struct MyParameters
     lam::Float64
