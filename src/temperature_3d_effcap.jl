@@ -1,4 +1,5 @@
 const USE_GPU = true
+using CUDA
 using ImplicitGlobalGrid
 using ParallelStencil
 using WriteVTK
@@ -77,12 +78,12 @@ _dx, _dy, _dz = 1.0/dx, 1.0/dy, 1.0/dz;
 xc, yc, zc = Array(LinRange(dx/2, lx-dx/2, nx)), Array(LinRange(dy/2, ly-dy/2, ny)), Array(LinRange(dz/2, lz-dz/2, nz))
 
 # Array initializations
-T   = @zeros(nx, ny, nz)
-T2  = @zeros(nx, ny, nz)
-Lam = @zeros(nx, ny, nz)
-Ci  = @zeros(nx, ny, nz)
+T   = CUDA.zeros(nx, ny, nz)
+T2  = CUDA.zeros(nx, ny, nz)
+Lam = CUDA.zeros(nx, ny, nz)
+Ci  = CUDA.zeros(nx, ny, nz)
 
-Lam .= Data.Array([if (iy > ny/2) lam else lam/2.0 end for ix=1:size(Lam,1), iy=1:size(Lam,2),iz=1:size(Lam,3)])                                    # conductivity
+Lam .= CuArray([if (iy > ny/2) lam else lam/2.0 end for ix=1:size(Lam,1), iy=1:size(Lam,2),iz=1:size(Lam,3)])                                    # conductivity
 #Lam .= Data.Array([lam*0.5(tanh(iy-ny/2)+1) for ix=1:size(Lam,1), iy=1:size(Lam,2),iz=1:size(Lam,3)])                                              # conductivity
 
 # Initial conditions

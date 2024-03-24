@@ -52,7 +52,7 @@ end
 function diffusion3D(;do_vtk=true)
 
 # read the parameters from the input file
-file = open("./input_3d.json", "r")
+file = open(joinpath(@__DIR__, "./input_3d.json"), "r")
 json_data = read(file, String)
 close(file)
 # parse the parameters from JSON data
@@ -80,10 +80,10 @@ _dx, _dy, _dz = 1.0/dx, 1.0/dy, 1.0/dz;
 xc, yc, zc = Array(LinRange(dx/2, lx-dx/2, nx)), Array(LinRange(dy/2, ly-dy/2, ny)), Array(LinRange(dz/2, lz-dz/2, nz))
 
 # Array initializations
-T   = @zeros(nx, ny, nz);
-T2  = @zeros(nx, ny, nz);
-Ci  = @zeros(nx, ny, nz);
-Sl  = @zeros(nx, ny, nz);
+T   = CUDA.zeros(nx, ny, nz);
+T2  = CUDA.zeros(nx, ny, nz);
+Ci  = CUDA.zeros(nx, ny, nz);
+Sl  = CUDA.zeros(nx, ny, nz);
 
 # Initial conditions
 Ci .= 1/c0;                                              # 1/Heat capacity
