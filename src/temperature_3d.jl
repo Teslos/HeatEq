@@ -5,13 +5,39 @@ using WriteVTK
 using Printf
 using JSON3
 using StructTypes
+using HDF5
+using CSV
+using Parquet
+using DataFrames
+using MeshGrid
+using NPZ
 
 @static if USE_GPU
     @init_parallel_stencil(CUDA, Float64, 3);
 else
     @init_parallel_stencil(Threads, Float64, 3);
 end
+function create_new_input(template_path::AbstractString;
+    P::Number, 
+    v::Number,
+    output_path::AbstractString="new_input.json")
+# Load the template JSON
+data = JSON3.read(read(template_path, String))
 
+# Create a mutable copy of the data
+mutable_data = copy(data)
+
+# Swap P and v values (place v in P field, and P in v field)
+mutable_data[:P] = P
+mutable_data[:v] = v
+
+# Write to new file
+open(output_path, "w") do io
+JSON3.write(io, mutable_data)
+end
+
+return output_path
+end
 # parameters struct to pass to simulation
 mutable struct MyParameters
     lam::Float64
@@ -49,14 +75,9 @@ StructTypes.StructType(::Type{MyParameters}) = StructTypes.OrderedStruct()
     return
 end
 
-function diffusion3D(;do_vtk=true)
-
-# read the parameters from the input file
-file = open(joinpath(@__DIR__, "./input_3d.json"), "r")
-json_data = read(file, String)
-close(file)
+function diffusion3D(;do_vtk=true, do_hdf5=true, do_csv=true, do_npz=true)
 # parse the parameters from JSON data
-parameters = JSON3.read(json_data, MyParameters)
+parameters = JSON3.read("input_3d.json")
 print(parameters)
 
 # Physics
@@ -70,8 +91,9 @@ P  = parameters.P                                         # power laser
 α  = parameters.α                                         # absorption coefficient
 σ  = parameters.σ                                         # absorption coefficient
 # Numerics
-nx, ny, nz = parameters.nx, parameters.ny, parameters.nz;        # Number of gridpoints in dimensions x, y and z
-nt         = parameters.nt;                                      # Number of time steps
+nx, ny, nz = parameters.nx, parameters.ny, parameters.nz; # Number of gridpoints in dimensions x, y and z
+nt         = parameters.nt;                               # Number of time steps
+# initialize only first call
 me, dims   = init_global_grid(nx, ny, nz);
 dx         = lx/(nx_g()-1);                              # Space step in x-dimension
 dy         = ly/(ny_g()-1);                              # Space step in y-dimension
@@ -85,45 +107,118 @@ T2  = CUDA.zeros(nx, ny, nz);
 Ci  = CUDA.zeros(nx, ny, nz);
 Sl  = CUDA.zeros(nx, ny, nz);
 
-# Initial conditions
-Ci .= 1/c0;                                              # 1/Heat capacity
-# Li  = 1/Lf;
-T  .= 1.7;
-T2 .= T;                                                 # Assign also T2 to get correct boundary conditions.
-Q = 6.0*sqrt(3)*α*P/(π*sqrt(π)*a*b*c)                      # Laser flux for Goldak's heat source
-# Time loop
-dt   = min(dx^2,dy^2,dz^2)/lam/maximum(Ci)/8.1;          # Time step for 3D Heat diffusion
-@printf("Choosen timestep: %g\n",dt)
-x0 = lx/2; y0 = ly/2; z0 = lz-dz;
-for it = 1:nt
-    if (it == 11) tic(); end                             # Start measuring time.
-    #Sl = CUDA.CuArray(source(it*dt))
-    x0 += v*dt
+# intialize the array of parameters
+params = [
+    (P=100.0, v=0.5),
+    (P=150.0, v=0.6),
+    (P=200.0, v=0.7),
+    (P=250.0, v=0.8),
+    (P=300.0, v=0.9)
+]
 
+# run the simulation for each set of parameters
+for (i, param) in enumerate(params)
+    P = param.P
+    v = param.v
 
+    # Initial conditions
+    Ci .= 1/c0;                                              # 1/Heat capacity
+    # Li  = 1/Lf;
+    T  .= 1.7;
+    T2 .= T;                                                 # Assign also T2 to get correct boundary conditions.
+    Q = 6.0*sqrt(3)*α*P/(π*sqrt(π)*a*b*c)                      # Laser flux for Goldak's heat source
+    # Time loop
+    dt   = min(dx^2,dy^2,dz^2)/lam/maximum(Ci)/8.1;          # Time step for 3D Heat diffusion
+    @printf("Choosen timestep: %g\n",dt)
+    x0 = lx/2; y0 = ly/2; z0 = lz-dz;
+    for it = 1:nt
+        if (it == 11) tic(); end                             # Start measuring time.
+        #Sl = CUDA.CuArray(source(it*dt))
+        x0 += v*dt
 
-    @hide_communication (16, 2, 2) begin
-        @parallel diffusion3D_step!(T2, T,  Q, Ci, lam,  dt, _dx, _dy, _dz, dx,
-                                    dy, dz, x0, y0, z0, a, b, c)
-        update_halo!(T2);
+        @hide_communication (16, 2, 2) begin
+            @parallel diffusion3D_step!(T2, T,  Q, Ci, lam,  dt, _dx, _dy, _dz, dx,
+                                        dy, dz, x0, y0, z0, a, b, c)
+            update_halo!(T2);
+        end
+        T, T2 = T2, T;
     end
-    T, T2 = T2, T;
+    time_s = toc()
+
+    # Performance
+    A_eff = (2*1+1)*1/1e9*nx*ny*nz*sizeof(Data.Number);      # Effective main memory access per iteration [GB] (Lower bound of required memory access: T has to be read and written: 2 whole-array memaccess; Ci has to be read: : 1 whole-array memaccess)
+    t_it  = time_s/(nt-10);                                  # Execution time per iteration [s]
+    T_eff = A_eff/t_it;                                      # Effective memory throughput [GB/s]
+    if (me==0) println("time_s=$time_s T_eff=$T_eff"); end
+
+    if do_vtk
+        vtk_grid("fields_3d_$(P)_$(v).vtr", xc, yc, zc) do vtk
+            vtk["Temperature"] = Array(T)
+            vtk["P"] = P
+            vtk["v"] = v
+            vtk["LaserX"] = x0
+            vtk["LaserY"] = y0
+            vtk["LaserZ"] = z0
+        end
+    end
+
+
+    if do_npz
+        filename = "fields_3d_$(P)_$(v).npz"
+        npzwrite(filename, Dict(
+            "Temperature" => vec(Array(T)),
+            "P"           => P,
+            "v"           => v,
+            "x"           => vec(xc),
+            "y"           => vec(yc),
+            "z"           => vec(zc),
+            "LaserX"      => x0,
+            "LaserY"      => y0,
+            "LaserZ"      => z0
+        ))
+    end
+
+    # write hdf5 file
+    if do_hdf5
+        h5open("fields_3d_$(P)_$(v).h5", "w") do file
+        # Create a group for coordinate
+        g = create_group(file, "coordinates")
+        dset = create_dataset(g, "x", Float64, (nx,))
+        write(dset, xc)
+        dset = create_dataset(g, "y", Float64, (ny,))
+        write(dset, yc)
+        dset = create_dataset(g, "z", Float64, (nz,))
+        write(dset, zc)
+        # create group for temperature
+        g = create_group(file, "temperature")
+        # Create a dataset for temperature data
+        g["temperature"] = Array{Float64}(T)
+        end
+    end
+
+    # write csv file (parquet) that is gzip
+    if do_csv
+        X,Y,Z = meshgrid(yc, xc, zc)
+        # Save coordinates and temperature data in a DataFrame in column-major order
+        df = DataFrame(
+            X = vec(X),
+            Y = vec(Y),
+            Z = vec(Z),
+            P = fill(P, length(X)),
+            v = fill(v, length(X)),
+            LaserX = fill(x0, length(X)),
+            LaserY = fill(y0, length(X)),
+            LaserZ = fill(z0, length(X)),
+            Temperature = vec(Array(T)),
+        )
+
+        # Write the DataFrame to a CSV file
+        Parquet.write_parquet("fields_3d_$(P)_$(v).parquet", df, compression_codec="gzip")
+    end
+        
 end
-time_s = toc()
-
-# Performance
-A_eff = (2*1+1)*1/1e9*nx*ny*nz*sizeof(Data.Number);      # Effective main memory access per iteration [GB] (Lower bound of required memory access: T has to be read and written: 2 whole-array memaccess; Ci has to be read: : 1 whole-array memaccess)
-t_it  = time_s/(nt-10);                                  # Execution time per iteration [s]
-T_eff = A_eff/t_it;                                      # Effective memory throughput [GB/s]
-if (me==0) println("time_s=$time_s T_eff=$T_eff"); end
-
 finalize_global_grid();
-
-if do_vtk
-    vtk_grid("fields_3d", xc, yc, zc) do vtk
-        vtk["Temperature"] = Array(T)
-    end
-end
 end
 
-diffusion3D()
+diffusion3D(;do_csv=true)
+
