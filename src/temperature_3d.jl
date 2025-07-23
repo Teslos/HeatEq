@@ -62,6 +62,49 @@ end
 
 StructTypes.StructType(::Type{MyParameters}) = StructTypes.OrderedStruct()
 
+function write_hdf5_output(filename, xc, yc, zc, T, P, v, nx, ny, nz, x0, y0, z0, 
+    lam, c0, lx, ly, lz, Lf, Tm, a, b, c, σ, α, nt, dt)
+    h5open(filename, "w") do file
+        # Create a group for coordinate
+        g = create_group(file, "coordinates")
+        dset = create_dataset(g, "x", Float64, (nx,))
+        write(dset, xc)
+        dset = create_dataset(g, "y", Float64, (ny,))
+        write(dset, yc)
+        dset = create_dataset(g, "z", Float64, (nz,))
+        write(dset, zc)
+        # create group for temperature
+        g = create_group(file, "temperature")
+        # Create a dataset for temperature data
+        g["temperature"] = Array{Float64}(T)
+        # Create a group for parameters
+        params_group = create_group(file, "parameters")
+        # Add parameters as attributes (for scalar values)
+        attributes(params_group)["P"] = P
+        attributes(params_group)["v"] = v
+        attributes(params_group)["nx"] = nx
+        attributes(params_group)["ny"] = ny
+        attributes(params_group)["nz"] = nz
+        attributes(params_group)["LaserX"] = x0
+        attributes(params_group)["LaserY"] = y0
+        attributes(params_group)["LaserZ"] = z0
+        attributes(params_group)["lam"] = lam
+        attributes(params_group)["c0"] = c0
+        attributes(params_group)["lx"] = lx 
+        attributes(params_group)["ly"] = ly
+        attributes(params_group)["lz"] = lz
+        attributes(params_group)["Lf"] = Lf
+        attributes(params_group)["Tm"] = Tm
+        attributes(params_group)["a"] = a
+        attributes(params_group)["b"] = b
+        attributes(params_group)["c"] = c
+        attributes(params_group)["σ"] = σ
+        attributes(params_group)["α"] = α
+        attributes(params_group)["nt"] = nt
+        attributes(params_group)["dt"] = dt
+        #attributes(params_group)["time_s"] = time_s
+    end
+end
 
 @parallel_indices (ix,iy,iz) function diffusion3D_step!(T2, T, Q, Ci, lam, dt, _dx, _dy, _dz, dx, dy, dz, x0, y0, z0, a,b,c)
         if (ix>1 && ix<size(T2,1) && iy>1 && iy<size(T2,2) && iz>1 && iz<size(T2,3))
@@ -79,7 +122,7 @@ function diffusion3D(;do_vtk=true, do_hdf5=true, do_csv=true, do_npz=true)
 # parse the parameters from JSON data
 parameters = JSON3.read("input_3d.json")
 print(parameters)
-
+write_interval = 1000                                     # Interval for writing output
 # Physics
 lam        = parameters.lam                               # Thermal conductivity
 c0         = parameters.c0                                # Heat capacity
@@ -110,10 +153,12 @@ Sl  = CUDA.zeros(nx, ny, nz);
 # intialize the array of parameters
 params = [
     (P=100.0, v=0.5),
+    #=
     (P=150.0, v=0.6),
     (P=200.0, v=0.7),
     (P=250.0, v=0.8),
     (P=300.0, v=0.9)
+    =#
 ]
 
 # run the simulation for each set of parameters
@@ -142,6 +187,13 @@ for (i, param) in enumerate(params)
             update_halo!(T2);
         end
         T, T2 = T2, T;
+        if (it % write_interval == 0)
+            @printf("Iteration %d/%d\n", it, nt)
+            if do_hdf5
+                write_hdf5_output("fields_3d_$(P)_$(v)_$(it).h5", xc, yc, zc, T, P, v, nx, ny, nz, 
+                x0, y0, z0, lam, c0, lx, ly, lz, parameters.Lf, parameters.Tm, a, b, c, σ, α, nt, dt) 
+            end
+        end
     end
     time_s = toc()
 
@@ -154,6 +206,9 @@ for (i, param) in enumerate(params)
     if do_vtk
         vtk_grid("fields_3d_$(P)_$(v).vtr", xc, yc, zc) do vtk
             vtk["Temperature"] = Array(T)
+            vtk["x"] = Array(xc)
+            vtk["y"] = Array(yc)
+            vtk["z"] = Array(zc)
             vtk["P"] = P
             vtk["v"] = v
             vtk["LaserX"] = x0
@@ -180,21 +235,11 @@ for (i, param) in enumerate(params)
 
     # write hdf5 file
     if do_hdf5
-        h5open("fields_3d_$(P)_$(v).h5", "w") do file
-        # Create a group for coordinate
-        g = create_group(file, "coordinates")
-        dset = create_dataset(g, "x", Float64, (nx,))
-        write(dset, xc)
-        dset = create_dataset(g, "y", Float64, (ny,))
-        write(dset, yc)
-        dset = create_dataset(g, "z", Float64, (nz,))
-        write(dset, zc)
-        # create group for temperature
-        g = create_group(file, "temperature")
-        # Create a dataset for temperature data
-        g["temperature"] = Array{Float64}(T)
-        end
+        write_hdf5_output("fields_3d_$(P)_$(v).h5", xc, yc, zc, T, P, v, nx, ny, nz, 
+        x0, y0, z0, lam, c0, lx, ly, lz, parameters.Lf, parameters.Tm, a, b, c, σ, α, nt, dt)
     end
+
+
 
     # write csv file (parquet) that is gzip
     if do_csv
@@ -220,5 +265,5 @@ end
 finalize_global_grid();
 end
 
-diffusion3D(;do_csv=true)
+diffusion3D(;do_hdf5=true)
 
